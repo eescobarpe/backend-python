@@ -38,3 +38,6 @@ def validate_group(payload: GroupPayload):
         "valid": len(errors) == 0,
         "errors": errors
     }
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
