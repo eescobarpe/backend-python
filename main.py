@@ -554,3 +554,17 @@ async def reset_sistema_total():
         return {"status": "success", "message": "Estructura antigua eliminada. Procede a /setup-sistema"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+@app.post("/resolver-evento/{evento_id}")
+async def resolver_evento(evento_id: int):
+    """Marca un error como solucionado para limpiar el diagnóstico"""
+    try:
+        conn = await get_db_connection()
+        # Actualizamos el estado a 'Resuelto'
+        await conn.execute(
+            "UPDATE silvernostop_audit_log SET estado_resolucion = 'Resuelto', updated_at = NOW() WHERE id = $1",
+            evento_id
+        )
+        await conn.close()
+        return {"status": "success", "mensaje": f"Evento {evento_id} marcado como RESUELTO. El sistema volverá a estar SALUDABLE."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
