@@ -542,3 +542,15 @@ def determinar_categoria_automatica(tabla_origen: str, tipo_evento: str) -> str:
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+@app.get("/reset-sistema-total")
+async def reset_sistema_total():
+    try:
+        conn = await get_db_connection()
+        # Borramos todo para limpiar la estructura antigua
+        await conn.execute("DROP TABLE IF EXISTS silvernostop_audit_log CASCADE")
+        await conn.execute("DROP TABLE IF EXISTS silvernostop_config_auditoria CASCADE")
+        await conn.execute("DROP TABLE IF EXISTS silvernostop_metricas CASCADE")
+        await conn.close()
+        return {"status": "success", "message": "Estructura antigua eliminada. Procede a /setup-sistema"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
