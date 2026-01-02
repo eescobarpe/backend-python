@@ -568,3 +568,20 @@ async def resolver_evento(evento_id: int):
         return {"status": "success", "mensaje": f"Evento {evento_id} marcado como RESUELTO. El sistema volverá a estar SALUDABLE."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
+
+# ... (tus otros imports y configuración de DB)
+
+templates = Jinja2Templates(directory="templates")
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def leer_dashboard(request: Request):
+    # 1. Obtenemos los datos reales de la base de datos
+    conn = await get_db_connection()
+    logs = await conn.fetch("SELECT * FROM silvernostop_audit_log ORDER BY timestamp DESC LIMIT 50")
+    await conn.close()
+    
+    # 2. Enviamos los datos al HTML
+    return templates.TemplateResponse("dashboard.html", {"request": request, "logs": logs})
