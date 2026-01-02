@@ -585,3 +585,90 @@ async def leer_dashboard(request: Request):
     
     # 2. Enviamos los datos al HTML
     return templates.TemplateResponse("dashboard.html", {"request": request, "logs": logs})
+import os
+from fastapi import FastAPI, Request, HTTPException, Depends
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
+from authlib.integrations.starlette_client import OAuth
+from starlette.middleware.sessions import SessionMiddleware
+
+# --- INICIALIZACIÓN ---
+app = FastAPI()
+
+# 1. MIDDLEWARE DE SESIÓN (Indispensable para Google Login)
+# Asegúrate de tener 'SECRET_KEY' en las variables de Railway
+app.add_middleware(SessionMiddleware, secret_key=os.getenv("SECRET_KEY", "silver_ultra_secret_2026"))
+
+templates = Jinja2Templates(directory="templates")
+
+# 2. CONFIGURACIÓN DE GOOGLE OAUTH
+oauth = OAuth()
+oauth.register(
+    name='google',
+    client_id=os.getenv("519442882454-ap4k1al3tvgl3ptmjm0741u0sa4mnl49.apps.googleusercontent.com"),
+    client_secret=os.getenv("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"),
+    server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
+    client_kwargs={'scope': 'openid email profile'}
+)
+
+# --- RUTAS DE AUTENTICACIÓN ---
+
+@app.get("/login")
+async def login(request: Request):
+    # Genera la URL de redirección hacia Google
+    # 'auth_callback' es el nombre de la función que definimos abajo
+    redirect_uri = request.url_for('auth_callback')
+    return await oauth.google.authorize_redirect(request, redirect_uri)
+
+@app.get("/auth")
+async def auth_callback(request: Request):
+    try:
+        token = await oauth.google.authorize_access_token(request)
+    except Exception as e:
+        return HTMLResponse(content=f"Error de autenticación: {e}", status_code=400)
+    
+    user_info = token.get('userinfo')
+    if not user_info:
+        raise HTTPException(status_code=400, detail="No se pudo obtener información de Google")
+
+    # 🛡️ FILTRO DE SEGURIDAD SILVER: Solo tú entras
+    # Cambia 'tu-email@gmail.com' por tu dirección real
+    EMAIL_AUTORIZADO = "escobar.enrique@gmail.com" 
+    
+    if user_info['email'] != EMAIL_AUTORIZADO:
+        raise HTTPException(
+            status_code=403, 
+            detail=f"Acceso denegado. El email {user_info['email']} no está autorizado."
+        )
+
+    # Si todo es correcto, guardamos el usuario en la sesión del navegador
+    request.session['user'] = dict(user_info)
+    return RedirectResponse(url='/dashboard')
+
+@app.get("/logout")
+async def logout(request: Request):
+    request.session.pop('user', None)
+    return RedirectResponse(url='/dashboard')
+
+# --- RUTA PROTEGIDA (DASHBOARD) ---
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def leer_dashboard(request: Request):
+    # Verificamos si hay un usuario logueado en la sesión
+    user = request.session.get('user')
+    if not user:
+        return RedirectResponse(url='/login')
+
+    # AQUÍ TU LÓGICA DE BASE DE DATOS PARA TRAER LOS LOGS
+    # conn = await get_db_connection()
+    # logs = await conn.fetch("SELECT * FROM silvernostop_audit_log ORDER BY timestamp DESC LIMIT 50")
+    # await conn.close()
+
+    # Simulamos logs para que no de error si aún no conectas la DB aquí
+    logs = [] # Sustituir por la consulta real a la base de datos
+
+    return templates.TemplateResponse("dashboard.html", {
+        "request": request,
+        "logs": logs,
+        "user": user # Pasamos el usuario para saludar en el HTML: {{ user.name }}
+    })
