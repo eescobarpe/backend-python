@@ -2,3 +2,5 @@ fastapi
 uvicorn
 asyncpg
 pydantic
+jinja2
+aiofiles
