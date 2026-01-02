@@ -4,3 +4,6 @@ asyncpg
 pydantic
 jinja2
 aiofiles
+authlib
+httpx
+itsdangerous
