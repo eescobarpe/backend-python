@@ -1,34 +1,69 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 import asyncpg
 import uvicorn
 import os
-from datetime import datetime
-from typing import Optional
+from datetime import datetime, timedelta
+from typing import Optional, Dict, List, Literal
+import json
+import hashlib
 import logging
+
+app = FastAPI(
+    title="SilverNonStop Sistema de Auditoría Completo",
+    description="Sistema de auditoría dinámico completo para arquitectura SilverNonStop",
+    version="1.0.0"
+)
 
 # Configuración de logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Configuración de base de datos PostgreSQL
+# Configuración de base de datos
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
-app = FastAPI(
-    title="SilverNonStop Sistema de Auditoría",
-    description="Sistema de auditoría para SilverNonStop con PostgreSQL",
-    version="1.0.0"
-)
+# Modelos para el sistema de auditoría (basados en tu documentación)
+class EventoAuditoriaBase(BaseModel):
+    tabla_origen: str
+    tipo_evento: str
+    severidad: Literal["CRITICA", "ALTA", "MEDIA", "BAJA", "INFO"]
+    descripcion: str
+    campo_afectado: Optional[str] = None
+    record_id: Optional[str] = None
+    datos_contexto: Optional[Dict] = {}
+    categoria_error: Optional[str] = None
+    impacto_narrativa: Optional[str] = "Sin_Impacto"
+    accion_requerida: Optional[str] = "Revisar manualmente"
 
-# Modelos
 class ErrorCriticoRequest(BaseModel):
     tabla_origen: str
     descripcion: str
     campo_afectado: Optional[str] = None
     record_id: Optional[str] = None
 
-# SQL para crear tabla PostgreSQL
-CREATE_AUDIT_TABLE_SQL = """
+class CampoFaltanteRequest(BaseModel):
+    tabla_origen: str
+    campo_faltante: str
+    contexto: Optional[Dict] = {}
+
+class ErrorFEMRequest(BaseModel):
+    campo: str
+    descripcion: str
+    contexto: Optional[Dict] = {}
+
+class ErrorDespivotadoRequest(BaseModel):
+    record_id: str
+    campo: str
+    error: str
+
+class InfoGeneralRequest(BaseModel):
+    tabla_origen: str
+    descripcion: str
+    contexto: Optional[Dict] = {}
+
+# Script SQL completo para crear todas las tablas
+CREATE_COMPLETE_AUDIT_SYSTEM_SQL = """
+-- Tabla principal de auditoría SilverNonStop (basada en tu documentación)
 CREATE TABLE IF NOT EXISTS silvernostop_audit_log (
     id SERIAL PRIMARY KEY,
     timestamp TIMESTAMPTZ DEFAULT NOW(),
@@ -38,12 +73,80 @@ CREATE TABLE IF NOT EXISTS silvernostop_audit_log (
     descripcion TEXT NOT NULL,
     campo_afectado VARCHAR(100),
     record_id VARCHAR(50),
+    datos_contexto JSONB DEFAULT '{}',
+    estado_resolucion VARCHAR(50) DEFAULT 'Pendiente',
+    accion_requerida TEXT,
+    categoria_error VARCHAR(100),
+    impacto_narrativa VARCHAR(50) DEFAULT 'Sin_Impacto',
+    automatizacion_origen VARCHAR(100) DEFAULT 'Railway_API',
+    hash_datos VARCHAR(50),
+    es_recurrente BOOLEAN DEFAULT FALSE,
+    contador_ocurrencias INTEGER DEFAULT 1,
+    arquitectura_version VARCHAR(50),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Tabla de configuración dinámica (basada en tu ConfiguracionDinamicaAuditoria)
+CREATE TABLE IF NOT EXISTS silvernostop_config_auditoria (
+    id SERIAL PRIMARY KEY,
+    tabla_detectada VARCHAR(100) NOT NULL UNIQUE,
+    categoria VARCHAR(50) NOT NULL,
+    criticidad VARCHAR(20) NOT NULL,
+    tipos_evento_validos JSONB DEFAULT '[]',
+    patrones_deteccion JSONB DEFAULT '[]',
+    activa BOOLEAN DEFAULT TRUE,
+    detectada_automaticamente BOOLEAN DEFAULT TRUE,
+    fecha_deteccion TIMESTAMPTZ DEFAULT NOW(),
+    ultima_actualizacion TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Tabla de métricas de éxito SilverNonStop
+CREATE TABLE IF NOT EXISTS silvernostop_metricas (
+    id SERIAL PRIMARY KEY,
+    fecha_medicion DATE DEFAULT CURRENT_DATE,
+    fems_minimos_configurados INTEGER DEFAULT 0,
+    nodos_mapa_valor_activos INTEGER DEFAULT 0,
+    campos_configuracion_completa_pct DECIMAL(5,2) DEFAULT 0.0,
+    errores_criticos_pendientes INTEGER DEFAULT 0,
+    calidad_perfiles_silver_pct DECIMAL(5,2) DEFAULT 0.0,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Índices para optimizar consultas
 CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON silvernostop_audit_log(timestamp);
+CREATE INDEX IF NOT EXISTS idx_audit_tabla_origen ON silvernostop_audit_log(tabla_origen);
 CREATE INDEX IF NOT EXISTS idx_audit_severidad ON silvernostop_audit_log(severidad);
-CREATE INDEX IF NOT EXISTS idx_audit_tabla ON silvernostop_audit_log(tabla_origen);
+CREATE INDEX IF NOT EXISTS idx_audit_hash ON silvernostop_audit_log(hash_datos);
+CREATE INDEX IF NOT EXISTS idx_audit_categoria ON silvernostop_audit_log(categoria_error);
+CREATE INDEX IF NOT EXISTS idx_audit_estado ON silvernostop_audit_log(estado_resolucion);
+
+-- Insertar configuración inicial para SilverNonStop (basada en tu documentación)
+INSERT INTO silvernostop_config_auditoria (tabla_detectada, categoria, criticidad, tipos_evento_validos) VALUES
+('Sistema_General', 'sistema', 'BAJA', '["Info_General", "Sistema_Warning"]'),
+('Campo_origen_despivotar', 'core', 'CRITICA', '["Error_Integridad", "Campo_Faltante", "Configuracion_Incorrecta", "Despivotado_Error"]'),
+('Talento6X_etapas', 'core', 'ALTA', '["Datos_Vida_Laboral_Corruptos", "Etapas_Laborales_Inconsistentes", "Fechas_Invalidas"]'),
+('T6X_etapas_FEM', 'fem', 'ALTA', '["FEM_Inconsistente", "FEM_Faltante", "Configuracion_FEM_Invalida"]'),
+('Config_FEM', 'fem', 'CRITICA', '["Configuracion_FEM_Invalida", "Scope_FEM_Incorrecto"]'),
+('T6X_etapas_etiquetas', 'procesamiento', 'MEDIA', '["Despivotado_Error", "Sincronizacion_Fallida", "Campo_Obsoleto"]'),
+('Mapa_Valor', 'output', 'MEDIA', '["Narrativa_Error", "Mapa_Valor_Incompleto", "Generacion_Fallida"]')
+ON CONFLICT (tabla_detectada) DO NOTHING;
+
+-- Función para actualizar timestamp automáticamente
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- Triggers para actualizar timestamp
+CREATE TRIGGER update_audit_log_updated_at BEFORE UPDATE ON silvernostop_audit_log 
+FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_config_updated_at BEFORE UPDATE ON silvernostop_config_auditoria 
+FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 """
 
 # Función para conectar a PostgreSQL
@@ -56,270 +159,384 @@ async def get_db_connection():
 
 @app.on_event("startup")
 async def startup_event():
-    """Inicializar PostgreSQL al arrancar"""
+    """Inicializar sistema completo de auditoría al arrancar"""
     try:
         conn = await get_db_connection()
-        await conn.execute(CREATE_AUDIT_TABLE_SQL)
+        await conn.execute(CREATE_COMPLETE_AUDIT_SYSTEM_SQL)
         await conn.close()
-        logger.info("✅ Sistema de auditoría SilverNonStop inicializado con PostgreSQL")
+        logger.info("✅ Sistema completo de auditoría SilverNonStop inicializado")
     except Exception as e:
-        logger.error(f"❌ Error inicializando sistema: {e}")
+        logger.error(f"❌ Error inicializando sistema de auditoría: {e}")
 
 @app.get("/")
 async def root():
     return {
-        "message": "🔍 SilverNonStop Sistema de Auditoría",
+        "message": "🔍 SilverNonStop Sistema de Auditoría Completo",
         "status": "active",
         "version": "1.0.0",
         "database": "PostgreSQL",
-        "migration": "✅ Migrado desde SQLite",
-        "endpoints": [
-            "/docs - Documentación Swagger",
-            "/setup-sistema - Configurar sistema",
+        "arquitectura": "Sistema completo de auditoría desacoplado",
+        "componentes": [
+            "Logging centralizado en PostgreSQL",
+            "Configuración dinámica automática",
+            "Validación y corrección automática",
+            "Métricas de éxito SilverNonStop",
+            "Endpoints especializados por tipo de error"
+        ],
+        "endpoints_principales": [
+            "/docs - Documentación Swagger completa",
+            "/setup-sistema - Configurar sistema completo",
             "/log-error-critico - Registrar error crítico",
-            "/diagnostico - Diagnóstico básico",
-            "/verificar-postgresql - Verificar PostgreSQL",
-            "/admin/tablas - Ver tablas",
-            "/admin/estructura - Ver estructura"
+            "/log-campo-faltante - Registrar campo faltante",
+            "/log-error-fem - Registrar error FEM",
+            "/log-error-despivotado - Registrar error despivotado",
+            "/log-info - Registrar información general",
+            "/diagnostico-completo - Diagnóstico completo",
+            "/metricas-silvernostop - Métricas de éxito"
         ]
     }
 
 @app.post("/setup-sistema")
-async def setup_sistema():
-    """Configurar sistema de auditoría"""
+async def setup_sistema_completo():
+    """Configurar sistema completo de auditoría SilverNonStop"""
     try:
         conn = await get_db_connection()
-        await conn.execute(CREATE_AUDIT_TABLE_SQL)
+        await conn.execute(CREATE_COMPLETE_AUDIT_SYSTEM_SQL)
         await conn.close()
         
         return {
             "status": "success",
-            "mensaje": "Sistema de auditoría configurado correctamente con PostgreSQL",
-            "database": "PostgreSQL",
-            "migration": "✅ Migrado desde SQLite"
+            "mensaje": "Sistema completo de auditoría configurado correctamente",
+            "tablas_creadas": [
+                "silvernostop_audit_log - Tabla principal de auditoría",
+                "silvernostop_config_auditoria - Configuración dinámica",
+                "silvernostop_metricas - Métricas de éxito"
+            ],
+            "configuracion_inicial": [
+                "7 tablas SilverNonStop configuradas automáticamente",
+                "Tipos de evento especializados por categoría",
+                "Índices optimizados para consultas",
+                "Triggers automáticos para timestamps"
+            ]
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error configurando sistema: {str(e)}")
 
+# ENDPOINTS ESPECIALIZADOS (Conversión directa de tu script)
+
 @app.post("/log-error-critico")
 async def log_error_critico(request: ErrorCriticoRequest):
-    """Registrar error crítico"""
+    """Registrar error crítico (conversión de logErrorCritico)"""
+    evento = EventoAuditoriaBase(
+        tabla_origen=request.tabla_origen,
+        tipo_evento="Error_Integridad",
+        severidad="CRITICA",
+        descripcion=request.descripcion,
+        campo_afectado=request.campo_afectado,
+        record_id=request.record_id,
+        impacto_narrativa="Bloquea_Generacion",
+        accion_requerida="Corregir inmediatamente"
+    )
+    return await procesar_evento_auditoria(evento)
+
+@app.post("/log-campo-faltante")
+async def log_campo_faltante(request: CampoFaltanteRequest):
+    """Registrar campo faltante (conversión de logCampoFaltante)"""
+    evento = EventoAuditoriaBase(
+        tabla_origen=request.tabla_origen,
+        tipo_evento="Campo_Faltante",
+        severidad="ALTA",
+        descripcion=f"Campo requerido '{request.campo_faltante}' no encontrado",
+        campo_afectado=request.campo_faltante,
+        datos_contexto=request.contexto,
+        impacto_narrativa="Datos_Incompletos",
+        accion_requerida=f"Configurar campo '{request.campo_faltante}'"
+    )
+    return await procesar_evento_auditoria(evento)
+
+@app.post("/log-error-fem")
+async def log_error_fem(request: ErrorFEMRequest):
+    """Registrar error FEM (conversión de logErrorFEM)"""
+    evento = EventoAuditoriaBase(
+        tabla_origen="Config_FEM",
+        tipo_evento="FEM_Inconsistente",
+        severidad="MEDIA",
+        descripcion=request.descripcion,
+        campo_afectado=request.campo,
+        datos_contexto=request.contexto,
+        categoria_error="Configuracion_FEM",
+        impacto_narrativa="Degrada_Calidad",
+        accion_requerida="Revisar configuración FEM"
+    )
+    return await procesar_evento_auditoria(evento)
+
+@app.post("/log-error-despivotado")
+async def log_error_despivotado(request: ErrorDespivotadoRequest):
+    """Registrar error de despivotado (conversión de logErrorDespivotado)"""
+    evento = EventoAuditoriaBase(
+        tabla_origen="Campo_origen_despivotar",
+        tipo_evento="Despivotado_Error",
+        severidad="ALTA",
+        descripcion=f"Error en despivotado del campo '{request.campo}': {request.error}",
+        campo_afectado=request.campo,
+        record_id=request.record_id,
+        categoria_error="Despivotado_SilverNonStop",
+        impacto_narrativa="Bloquea_Generacion",
+        accion_requerida="Revisar configuración de despivotado"
+    )
+    return await procesar_evento_auditoria(evento)
+
+@app.post("/log-info")
+async def log_info_general(request: InfoGeneralRequest):
+    """Registrar información general (conversión de logInfo)"""
+    evento = EventoAuditoriaBase(
+        tabla_origen=request.tabla_origen,
+        tipo_evento="Info_General",
+        severidad="INFO",
+        descripcion=request.descripcion,
+        datos_contexto=request.contexto,
+        impacto_narrativa="Sin_Impacto",
+        accion_requerida="Ninguna"
+    )
+    return await procesar_evento_auditoria(evento)
+
+# FUNCIÓN PRINCIPAL DE PROCESAMIENTO (Conversión de crearLogSilverNonStop)
+async def procesar_evento_auditoria(evento: EventoAuditoriaBase):
+    """Función principal de procesamiento (conversión de tu script)"""
     try:
         conn = await get_db_connection()
         
-        evento_id = await conn.fetchval(
-            """INSERT INTO silvernostop_audit_log 
-               (tabla_origen, tipo_evento, severidad, descripcion, campo_afectado, record_id)
-               VALUES ($1, $2, $3, $4, $5, $6)
-               RETURNING id""",
-            request.tabla_origen,
-            "Error_Integridad",
-            "CRITICA",
-            request.descripcion,
-            request.campo_afectado,
-            request.record_id
+        # Validar tabla origen
+        tabla_validada = await validar_tabla_existe(evento.tabla_origen)
+        
+        # Generar hash para detección de duplicados
+        hash_datos = generar_hash_evento(evento)
+        
+        # Verificar si es duplicado
+        existing = await conn.fetchrow(
+            "SELECT id, contador_ocurrencias FROM silvernostop_audit_log WHERE hash_datos = $1",
+            hash_datos
         )
         
-        await conn.close()
-        
-        logger.warning(f"🚨 ALERTA CRÍTICA: {request.tabla_origen} - {request.descripcion}")
-        
-        return {
-            "status": "success",
-            "evento_id": evento_id,
-            "mensaje": f"Error crítico registrado para {request.tabla_origen}",
-            "database": "PostgreSQL"
-        }
-        
+        if existing:
+            # Incrementar contador de duplicado
+            await conn.execute(
+                """UPDATE silvernostop_audit_log 
+                   SET contador_ocurrencias = contador_ocurrencias + 1,
+                       es_recurrente = TRUE,
+                       updated_at = NOW()
+                   WHERE id = $1""",
+                existing['id']
+            )
+            
+            await conn.close()
+            return {
+                "status": "duplicado_actualizado",
+                "evento_id": existing['id'],
+                "contador_ocurrencias": existing['contador_ocurrencias'] + 1,
+                "mensaje": "Evento duplicado, contador incrementado"
+            }
+        else:
+            # Crear nuevo evento
+            categoria_automatica = determinar_categoria_automatica(tabla_validada, evento.tipo_evento)
+            
+            evento_id = await conn.fetchval(
+                """INSERT INTO silvernostop_audit_log 
+                   (tabla_origen, tipo_evento, severidad, descripcion, campo_afectado, 
+                    record_id, datos_contexto, categoria_error, impacto_narrativa, 
+                    automatizacion_origen, hash_datos, accion_requerida, arquitectura_version)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                   RETURNING id""",
+                tabla_validada,
+                evento.tipo_evento,
+                evento.severidad,
+                evento.descripcion,
+                evento.campo_afectado,
+                evento.record_id,
+                json.dumps(evento.datos_contexto),
+                evento.categoria_error or categoria_automatica,
+                evento.impacto_narrativa,
+                "Railway_API",
+                hash_datos,
+                evento.accion_requerida,
+                datetime.now().isoformat()
+            )
+            
+            await conn.close()
+            
+            # Si es crítico, log especial
+            if evento.severidad == "CRITICA":
+                logger.warning(f"🚨 ALERTA CRÍTICA SILVERNOSTOP: {tabla_validada} - {evento.descripcion}")
+            
+            return {
+                "status": "success",
+                "evento_id": evento_id,
+                "mensaje": f"Evento registrado para {tabla_validada}",
+                "categoria_asignada": evento.categoria_error or categoria_automatica,
+                "hash_datos": hash_datos
+            }
+            
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error registrando evento: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error procesando evento: {str(e)}")
 
-@app.get("/diagnostico")
-async def diagnostico_basico():
-    """Diagnóstico básico del sistema"""
+@app.get("/diagnostico-completo")
+async def diagnostico_completo():
+    """Diagnóstico completo del sistema (conversión de diagnosticarArquitectura)"""
     try:
         conn = await get_db_connection()
         
-        # Contar eventos totales
+        # Estadísticas generales
         total_eventos = await conn.fetchval("SELECT COUNT(*) FROM silvernostop_audit_log")
         
-        # Contar eventos críticos
-        criticos = await conn.fetchval(
-            "SELECT COUNT(*) FROM silvernostop_audit_log WHERE severidad = 'CRITICA'"
+        # Eventos por severidad
+        severidad_rows = await conn.fetch(
+            "SELECT severidad, COUNT(*) as count FROM silvernostop_audit_log GROUP BY severidad"
         )
+        eventos_por_severidad = {row['severidad']: row['count'] for row in severidad_rows}
+        
+        # Eventos críticos pendientes
+        criticos_pendientes = await conn.fetchval(
+            "SELECT COUNT(*) FROM silvernostop_audit_log WHERE severidad = 'CRITICA' AND estado_resolucion = 'Pendiente'"
+        )
+        
+        # Tablas monitoreadas
+        tablas_rows = await conn.fetch(
+            "SELECT DISTINCT tabla_origen FROM silvernostop_audit_log ORDER BY tabla_origen"
+        )
+        tablas_monitoreadas = [row['tabla_origen'] for row in tablas_rows]
+        
+        # Eventos recientes
+        eventos_recientes = await conn.fetch(
+            """SELECT timestamp, tabla_origen, tipo_evento, severidad, descripcion 
+               FROM silvernostop_audit_log 
+               ORDER BY timestamp DESC LIMIT 10"""
+        )
+        
+        # Estado del sistema
+        estado_sistema = "SALUDABLE"
+        if criticos_pendientes > 0:
+            estado_sistema = "CRITICO"
+        elif eventos_por_severidad.get("ALTA", 0) > 5:
+            estado_sistema = "ATENCION"
         
         await conn.close()
         
         return {
-            "estado_sistema": "CRITICO" if criticos > 0 else "SALUDABLE",
-            "total_eventos": total_eventos,
-            "eventos_criticos": criticos,
-            "database": "PostgreSQL",
-            "migration": "✅ Migrado desde SQLite",
-            "ultima_actualizacion": datetime.now().isoformat()
+            "diagnostico_silvernostop": {
+                "estado_sistema": estado_sistema,
+                "total_eventos": total_eventos,
+                "eventos_por_severidad": eventos_por_severidad,
+                "criticos_pendientes": criticos_pendientes,
+                "tablas_monitoreadas": tablas_monitoreadas,
+                "eventos_recientes": [dict(evento) for evento in eventos_recientes],
+                "ultima_actualizacion": datetime.now().isoformat()
+            },
+            "metricas_objetivo": {
+                "fems_minimos_requeridos": 5,
+                "nodos_mapa_valor_requeridos": 5,
+                "configuracion_completa_objetivo": 90.0,
+                "errores_criticos_objetivo": 0
+            }
         }
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error en diagnóstico: {str(e)}")
 
-@app.get("/verificar-postgresql")
-async def verificar_postgresql():
-    """Verificar que PostgreSQL funciona correctamente"""
+@app.get("/metricas-silvernostop")
+async def obtener_metricas_silvernostop():
+    """Métricas específicas de éxito SilverNonStop"""
     try:
         conn = await get_db_connection()
         
-        # Verificar versión de PostgreSQL
-        version_pg = await conn.fetchval("SELECT version()")
-        
-        # Verificar que la tabla existe
-        tabla_existe = await conn.fetchval(
-            "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'silvernostop_audit_log')"
+        # Calcular métricas actuales
+        criticos_pendientes = await conn.fetchval(
+            "SELECT COUNT(*) FROM silvernostop_audit_log WHERE severidad = 'CRITICA' AND estado_resolucion = 'Pendiente'"
         )
         
-        # Contar registros
-        total_registros = await conn.fetchval("SELECT COUNT(*) FROM silvernostop_audit_log")
+        # Simular métricas (en producción vendrían de Airtable)
+        metricas_actuales = {
+            "fems_minimos_configurados": 5,  # Sector, Rol, Equipo, Áreas, Países
+            "nodos_mapa_valor_activos": 4,   # Simulado
+            "campos_configuracion_completa_pct": 85.5,
+            "errores_criticos_pendientes": criticos_pendientes,
+            "calidad_perfiles_silver_pct": 92.3
+        }
         
-        # Info de conexión
-        db_info = await conn.fetchrow("SELECT current_database(), current_user")
+        # Guardar métricas
+        await conn.execute(
+            """INSERT INTO silvernostop_metricas 
+               (fems_minimos_configurados, nodos_mapa_valor_activos, 
+                campos_configuracion_completa_pct, errores_criticos_pendientes, 
+                calidad_perfiles_silver_pct)
+               VALUES ($1, $2, $3, $4, $5)""",
+            metricas_actuales["fems_minimos_configurados"],
+            metricas_actuales["nodos_mapa_valor_activos"],
+            metricas_actuales["campos_configuracion_completa_pct"],
+            metricas_actuales["errores_criticos_pendientes"],
+            metricas_actuales["calidad_perfiles_silver_pct"]
+        )
         
         await conn.close()
         
         return {
-            "postgresql_disponible": True,
-            "version_postgresql": version_pg.split()[1] if version_pg else "Unknown",
-            "tabla_auditoria_existe": tabla_existe,
-            "total_registros": total_registros,
-            "database_name": db_info['current_database'],
-            "user": db_info['current_user'],
-            "migration": "✅ Migrado desde SQLite",
-            "status": "✅ PostgreSQL funcionando correctamente"
+            "metricas_silvernostop": metricas_actuales,
+            "objetivos": {
+                "fems_minimos": 5,
+                "nodos_mapa_valor": 5,
+                "configuracion_completa": 90.0,
+                "errores_criticos": 0,
+                "calidad_perfiles": 95.0
+            },
+            "estado_cumplimiento": {
+                "fems_ok": metricas_actuales["fems_minimos_configurados"] >= 5,
+                "nodos_ok": metricas_actuales["nodos_mapa_valor_activos"] >= 5,
+                "configuracion_ok": metricas_actuales["campos_configuracion_completa_pct"] >= 90.0,
+                "criticos_ok": metricas_actuales["errores_criticos_pendientes"] == 0,
+                "calidad_ok": metricas_actuales["calidad_perfiles_silver_pct"] >= 95.0
+            }
         }
         
     except Exception as e:
-        return {
-            "postgresql_disponible": False,
-            "error": str(e),
-            "status": "❌ Error con PostgreSQL"
-        }
+        raise HTTPException(status_code=500, detail=f"Error obteniendo métricas: {str(e)}")
 
-@app.get("/eventos-recientes")
-async def eventos_recientes():
-    """Ver eventos recientes"""
-    try:
-        conn = await get_db_connection()
-        
-        eventos = await conn.fetch(
-            """SELECT id, timestamp, tabla_origen, tipo_evento, severidad, 
-                      descripcion, campo_afectado, record_id
-               FROM silvernostop_audit_log 
-               ORDER BY timestamp DESC 
-               LIMIT 10"""
-        )
-        
-        await conn.close()
-        
-        eventos_list = []
-        for evento in eventos:
-            eventos_list.append({
-                "id": evento['id'],
-                "timestamp": evento['timestamp'].isoformat(),
-                "tabla_origen": evento['tabla_origen'],
-                "tipo_evento": evento['tipo_evento'],
-                "severidad": evento['severidad'],
-                "descripcion": evento['descripcion'],
-                "campo_afectado": evento['campo_afectado'],
-                "record_id": evento['record_id']
-            })
-        
-        return {
-            "eventos": eventos_list,
-            "total": len(eventos_list),
-            "database": "PostgreSQL",
-            "migration": "✅ Migrado desde SQLite"
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error obteniendo eventos: {str(e)}")
+# Funciones auxiliares (conversión de tu script)
+async def validar_tabla_existe(nombre_tabla: str) -> str:
+    """Validar tabla existe (conversión de validarTablaOrigen)"""
+    tablas_validas = [
+        "Sistema_General", "Campo_origen_despivotar", "Talento6X_etapas",
+        "T6X_etapas_FEM", "Config_FEM", "T6X_etapas_etiquetas", "Mapa_Valor"
+    ]
+    
+    if nombre_tabla in tablas_validas:
+        return nombre_tabla
+    
+    logger.warning(f"⚠️ Tabla '{nombre_tabla}' no encontrada. Usando 'Sistema_General'")
+    return "Sistema_General"
 
-# ENDPOINTS DE ADMINISTRACIÓN (NUEVOS)
-@app.get("/admin/tablas")
-async def ver_tablas():
-    """Ver todas las tablas de PostgreSQL"""
-    try:
-        conn = await get_db_connection()
-        
-        tablas = await conn.fetch(
-            """SELECT table_name, table_type 
-               FROM information_schema.tables 
-               WHERE table_schema = 'public'
-               ORDER BY table_name"""
-        )
-        
-        await conn.close()
-        
-        return {
-            "tablas": [{"nombre": t['table_name'], "tipo": t['table_type']} for t in tablas],
-            "total": len(tablas),
-            "database": "PostgreSQL"
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error obteniendo tablas: {str(e)}")
+def generar_hash_evento(evento: EventoAuditoriaBase) -> str:
+    """Generar hash para detección de duplicados (conversión de generarHashSimple)"""
+    data_string = f"{evento.tabla_origen}_{evento.tipo_evento}_{evento.campo_afectado}_{evento.record_id}"
+    return hashlib.md5(data_string.encode()).hexdigest()[:16]
 
-@app.get("/admin/estructura")
-async def ver_estructura():
-    """Ver estructura de la tabla principal"""
-    try:
-        conn = await get_db_connection()
-        
-        columnas = await conn.fetch(
-            """SELECT column_name, data_type, is_nullable, column_default
-               FROM information_schema.columns 
-               WHERE table_name = 'silvernostop_audit_log'
-               ORDER BY ordinal_position"""
-        )
-        
-        await conn.close()
-        
-        return {
-            "tabla": "silvernostop_audit_log",
-            "columnas": [
-                {
-                    "nombre": c['column_name'],
-                    "tipo": c['data_type'],
-                    "nullable": c['is_nullable'],
-                    "default": c['column_default']
-                } for c in columnas
-            ],
-            "total_columnas": len(columnas),
-            "database": "PostgreSQL"
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error obteniendo estructura: {str(e)}")
-
-@app.get("/admin/todos-eventos")
-async def todos_eventos():
-    """Ver TODOS los eventos (sin límite)"""
-    try:
-        conn = await get_db_connection()
-        
-        eventos = await conn.fetch(
-            """SELECT * FROM silvernostop_audit_log 
-               ORDER BY timestamp DESC"""
-        )
-        
-        await conn.close()
-        
-        return {
-            "eventos": [dict(evento) for evento in eventos],
-            "total": len(eventos),
-            "database": "PostgreSQL",
-            "migration": "✅ Migrado desde SQLite"
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error obteniendo todos los eventos: {str(e)}")
+def determinar_categoria_automatica(tabla_origen: str, tipo_evento: str) -> str:
+    """Determinar categoría automáticamente (conversión de determinarCategoria)"""
+    mapeo_tabla = {
+        "Campo_origen_despivotar": "Despivotado_SilverNonStop",
+        "Config_FEM": "Configuracion_FEM",
+        "T6X_etapas_FEM": "Configuracion_FEM",
+        "Talento6X_etapas": "Vida_Laboral_Processing",
+        "T6X_etapas_etiquetas": "Mapa_Valor_SilverNonStop",
+        "Mapa_Valor": "Narrativa_Generation_Silver"
+    }
+    
+    mapeo_tipo = {
+        "FEM_Inconsistente": "Configuracion_FEM",
+        "Despivotado_Error": "Despivotado_SilverNonStop",
+        "Narrativa_Error": "Narrativa_Generation_Silver",
+        "Sincronizacion_Fallida": "Sincronizacion_SilverNonStop"
+    }
+    
+    return mapeo_tipo.get(tipo_evento) or mapeo_tabla.get(tabla_origen) or "Integridad_Datos"
 
 # Configuración para Railway
 if __name__ == "__main__":
