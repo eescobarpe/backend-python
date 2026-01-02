@@ -2,44 +2,52 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>SilverNonStop - Auditoría</title>
+    <meta http-equiv="refresh" content="30"> <title>SilverNonStop - Auditoría Pro</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gray-100 p-8">
+<body class="bg-slate-50 p-4 md:p-8">
     <div class="max-w-6xl mx-auto">
-        <h1 class="text-3xl font-bold mb-6 text-slate-800">🚀 Panel de Auditoría SilverNonStop</h1>
+        <div class="flex justify-between items-center mb-8">
+            <h1 class="text-3xl font-extrabold text-slate-900 tracking-tight">🚀 SilverNonStop <span class="text-blue-600">AuditLog</span></h1>
+            <div class="text-sm text-slate-500 bg-white px-4 py-2 rounded-full shadow-sm border">
+                Próxima actualización en 30s...
+            </div>
+        </div>
         
-        <div class="bg-white shadow-xl rounded-lg overflow-hidden">
+        <div class="bg-white shadow-2xl rounded-2xl overflow-hidden border border-slate-200">
             <table class="w-full text-left border-collapse">
-                <thead class="bg-slate-800 text-white">
-                    <tr>
-                        <th class="p-4">Fecha</th>
-                        <th class="p-4">Tabla</th>
-                        <th class="p-4">Severidad</th>
-                        <th class="p-4">Descripción</th>
-                        <th class="p-4">Estado</th>
-                        <th class="p-4">Acción</th>
+                <thead>
+                    <tr class="bg-slate-900 text-slate-200 uppercase text-xs tracking-widest">
+                        <th class="p-4 font-semibold">Fecha/Hora</th>
+                        <th class="p-4 font-semibold">Origen</th>
+                        <th class="p-4 font-semibold">Severidad</th>
+                        <th class="p-4 font-semibold">Descripción</th>
+                        <th class="p-4 font-semibold text-center">Acción</th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody class="divide-y divide-slate-100">
                     {% for log in logs %}
-                    <tr class="border-b hover:bg-gray-50">
-                        <td class="p-4 text-sm">{{ log.timestamp.strftime('%d/%m %H:%M') }}</td>
-                        <td class="p-4 font-semibold">{{ log.tabla_origen }}</td>
+                    <tr class="hover:bg-slate-50 transition-colors {{ 'bg-red-50/30' if log.severidad == 'CRITICA' and log.estado_resolucion == 'Pendiente' }}">
+                        <td class="p-4 text-sm text-slate-500">{{ log.timestamp.strftime('%d/%m · %H:%M') }}</td>
+                        <td class="p-4 font-medium text-slate-700">{{ log.tabla_origen }}</td>
                         <td class="p-4">
-                            <span class="px-2 py-1 rounded text-xs {{ 'bg-red-100 text-red-700' if log.severidad == 'CRÍTICO' else 'bg-orange-100 text-orange-700' }}">
+                            <span class="px-3 py-1 rounded-full text-[10px] font-bold uppercase {{ 'bg-red-500 text-white' if log.severidad == 'CRITICA' else 'bg-amber-500 text-white' if log.severidad == 'MEDIA' else 'bg-blue-500 text-white' }}">
                                 {{ log.severidad }}
                             </span>
                         </td>
-                        <td class="p-4 text-gray-600">{{ log.descripcion }}</td>
-                        <td class="p-4 italic text-sm">{{ log.estado_resolucion }}</td>
-                        <td class="p-4">
+                        <td class="p-4 text-slate-600 text-sm">
+                            <div class="font-medium">{{ log.descripcion }}</div>
+                            <div class="text-[10px] text-slate-400 mt-1">ID: {{ log.record_id }}</div>
+                        </td>
+                        <td class="p-4 text-center">
                             {% if log.estado_resolucion == 'Pendiente' %}
-                            <button onclick="resolver({{ log.id }})" class="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded text-sm transition">
-                                Resolver
+                            <button onclick="resolver({{ log.id }})" class="bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-2 px-4 rounded-lg text-xs shadow-lg shadow-emerald-200 transition-all active:scale-95">
+                                RESOLVER
                             </button>
                             {% else %}
-                            <span class="text-green-600">✅</span>
+                            <span class="flex items-center justify-center text-emerald-600 font-bold text-xs bg-emerald-50 px-2 py-1 rounded border border-emerald-100">
+                                ✅ RESUELTO
+                            </span>
                             {% endif %}
                         </td>
                     </tr>
@@ -51,8 +59,9 @@
 
     <script>
         async function resolver(id) {
+            if(!confirm("¿Confirmas que el error ha sido subsanado en Airtable?")) return;
             const res = await fetch(`/resolver-evento/${id}`, { method: 'POST' });
-            if (res.ok) location.reload(); // Recarga la página para ver el cambio
+            if (res.ok) location.reload();
         }
     </script>
 </body>
