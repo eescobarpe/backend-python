@@ -7,3 +7,4 @@ aiofiles
 authlib
 httpx
 itsdangerous
+pydantic-settings
