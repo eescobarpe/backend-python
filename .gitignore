@@ -1,0 +1,15 @@
+# Secretos y Configuración
+.env
+
+# Python (Archivos temporales)
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+build/
+dist/
+
+# Sistema
+.DS_Store
+Thumbs.db
