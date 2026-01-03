@@ -8,3 +8,4 @@ authlib
 httpx
 itsdangerous
 pydantic-settings
+python-multipart
